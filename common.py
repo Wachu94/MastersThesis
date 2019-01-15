@@ -45,10 +45,10 @@ def calculate_gradient(X, Y, weights, activation="ReLU", logits=True):
 
 def setup_weights(env, hidden_layers, minimum=0, maximum=1, v_weights=False):
     if env != None:
-        if len(env.reset().shape) == 3:
-            input_size = len(np.reshape(preprocess(env.reset()), -1))
-        else:
-            input_size = len(np.reshape(env.reset(), -1))
+        input_size = len(np.reshape(env.reset(), -1))
+        if hasattr(env.reset(), "shape"):
+            if len(env.reset().shape) == 3:
+                input_size = len(np.reshape(preprocess(env.reset()), -1))
         if isinstance(env.action_space.sample(), int):
             output_size = env.action_space.n
         else:
@@ -61,7 +61,8 @@ def setup_weights(env, hidden_layers, minimum=0, maximum=1, v_weights=False):
         layers[-1] = 1
     weights = []
     for i in range(len(layers) - 1):
-        weights.append(np.random.uniform(minimum, maximum, size=(layers[i] + 1, layers[i + 1])))
+        # weights.append(np.random.uniform(minimum, maximum, size=(layers[i] + 1, layers[i + 1])))
+        weights.append(np.random.randn(layers[i] + 1, layers[i + 1]) / (layers[i] + 1))
     return weights
 
 
@@ -173,13 +174,11 @@ def run_env(env, weights, episodes, activation="ReLU", preprocess_img=False, dis
 
     score = [0] * episodes
     for i, _ in enumerate(progress_bar):
-        counter = 0
         observation = env.reset()
         if preprocess_img:
             observation = preprocess(observation)
             current_observation = observation
         while True:
-            counter += 1
             if render:
                 env.render()
 
@@ -187,7 +186,6 @@ def run_env(env, weights, episodes, activation="ReLU", preprocess_img=False, dis
             logits = forward_prop(observation, weights, activation)
             probs = activate(logits, "Sigmoid")
             probs /= np.sum(probs)
-            # probs = activate(probs, "Softmax")
 
             if discrete:
                 action = pick_action(probs)
@@ -199,7 +197,7 @@ def run_env(env, weights, episodes, activation="ReLU", preprocess_img=False, dis
                 action = probs
                 decision = action
 
-            state_buffer.append(np.r_[counter, observation])
+            state_buffer.append(observation)
             action_buffer.append(decision)
 
             if preprocess_img:
@@ -222,6 +220,4 @@ def run_env(env, weights, episodes, activation="ReLU", preprocess_img=False, dis
     progress_bar.close()
     if only_score:
         return score
-    return np.array(state_buffer), action_buffer, np.reshape(get_v(reward_buffer, 100, 0.99), (-1, 1)), score
-
-
+    return np.array(state_buffer), action_buffer, np.reshape(get_v(reward_buffer, 10000, 0.99), (-1, 1)), score
