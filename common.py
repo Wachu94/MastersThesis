@@ -1,5 +1,6 @@
 import numpy as np, random, pickle
 from tqdm import trange
+from matplotlib import pyplot as plt
 
 
 def save(data, name="save"):
@@ -14,8 +15,13 @@ def load(name):
     except FileNotFoundError:
         return None
 
+def cross_entropy(p, q):
+    output = [0] * len(p)
+    for i in range(len(p)):
+        output[i] = np.sum(p[i] * np.log2(p[i])) - np.sum(p[i] * np.log2(q[i]))
+    return output
 
-def calculate_gradient(X, Y, weights, activation="ReLU", logits=True):
+def calculate_gradient(X, Y, weights, activation="ReLU", logits=True, use_cross_entropy=False):
     neuron_values = []
     output = X
     for i in range(len(weights)):
@@ -26,7 +32,13 @@ def calculate_gradient(X, Y, weights, activation="ReLU", logits=True):
             output = activate(output, activation)
     if logits:
         output = activate(output, "Sigmoid")
-    errors = [Y - output]
+
+    if use_cross_entropy:
+        errors = cross_entropy(Y, output)
+        print(errors)
+        breakpoint()
+    else:
+        errors = [Y - output]
     loss = np.sum(np.sum((errors[len(errors) - 1]) ** 2))
     for i in range(len(weights) - 1):
         errors.append(errors[i].dot(weights[len(weights) - 1 - i].T))
@@ -139,7 +151,7 @@ def measure_min_max(weights):
 
 
 def preprocess(observation):
-    observation = observation[::4, ::4, 0]
+    observation = observation[::2, ::2, 0] / 255
     return observation.astype(np.float).ravel()
 
 
@@ -163,9 +175,15 @@ def get_v(reward_buffer, horizon, discount):
     return np.array(V)
 
 
-def run_env(env, weights, episodes, activation="ReLU", preprocess_img=False, discrete=True, render=False, show_progress_bar=True, only_score=False, v_weights=None):
+def run_env(env, weights, episodes, activation="ReLU", preprocess_img=False, discrete=True, deterministic=False, render=False, show_progress_bar=True, only_score=False, v_weights=None):
 
-    state_buffer, action_buffer, reward_buffer = [], [], [[] for _ in range(episodes)]
+    state_buffer, probs_buffer, action_buffer, reward_buffer = [], [], [], [[] for _ in range(episodes)]
+
+    # plt.ion()
+    # # fig = plt.figure()
+    # plt.subplot(121)
+    #
+    # v_values = []
 
     if show_progress_bar:
         progress_bar = trange(episodes)
@@ -175,41 +193,50 @@ def run_env(env, weights, episodes, activation="ReLU", preprocess_img=False, dis
     score = [0] * episodes
     for i, _ in enumerate(progress_bar):
         observation = env.reset()
-        if preprocess_img:
-            observation = preprocess(observation)
-            current_observation = observation
+        # if preprocess_img:
+        #     observation = preprocess(observation)
+        #     current_observation = observation
         while True:
-            if render:
-                env.render()
-
+            if preprocess_img:
+                observation = preprocess(observation)
+                # current_observation = observation
+                # observation -= prev_observation
             observation = np.reshape(observation, -1)
             logits = forward_prop(observation, weights, activation)
-            probs = activate(logits, "Sigmoid")
-            probs /= np.sum(probs)
+            # v_value = forward_prop(observation, v_weights, activation)
+            probs = logits
+            if not deterministic:
+                probs = activate(logits, "Sigmoid")
+                probs /= np.sum(probs)
+
+            if render:
+                env.render()
+                # print("Probs: {} V-value: {}".format(probs.round(2), v_value))
 
             if discrete:
-                action = pick_action(probs)
+                if deterministic:
+                    action = np.argmax(logits)
+                    probs = np.zeros_like(logits)
+                    probs[action] = 1
+                else:
+                    action = pick_action(probs)
 
-                decision = -probs
-                decision[action] += 1
+                # decision = -probs
+                # decision[action] += 1
 
             else:
                 action = probs
-                decision = action
+                # decision = action
 
             state_buffer.append(observation)
-            action_buffer.append(decision)
+            probs_buffer.append(probs)
+            action_buffer.append(action)
 
-            if preprocess_img:
-                prev_observation = current_observation
+            # if preprocess_img:
+            #     prev_observation = current_observation
 
             observation, reward, done, info = env.step(action)
             score[i] += reward
-
-            if preprocess_img:
-                observation = preprocess(observation)
-                current_observation = observation
-                observation -= prev_observation
 
             reward_buffer[i].append(reward)
 
@@ -220,4 +247,4 @@ def run_env(env, weights, episodes, activation="ReLU", preprocess_img=False, dis
     progress_bar.close()
     if only_score:
         return score
-    return np.array(state_buffer), action_buffer, np.reshape(get_v(reward_buffer, 10000, 0.99), (-1, 1)), score
+    return np.array(state_buffer), probs_buffer, action_buffer, reward_buffer, score
