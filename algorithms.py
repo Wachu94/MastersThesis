@@ -1,4 +1,4 @@
-import numpy as np, random, gym, personalGym
+import numpy as np, random, gym, personalGym, time
 from common import save, combine, mutate, setup_weights, run_env, forward_prop, activate, pick_action, \
     load, measure_min_max, get_v
 from optimizers import Adam, SGD
@@ -30,7 +30,7 @@ def init(env_name, hidden_layers, tweak_param, algorithmID, load_weights, load_v
     if load_v_weights:
         v_weights = load("{}_{}".format(env_name, "V"))
         if not hasattr(v_weights, '__iter__'):
-            v_weights = setup_weights(env, hidden_layers=[], v_weights=True)
+            v_weights = setup_weights(env, hidden_layers=[128], v_weights=True)
         return env, env_name, policy_weights, v_weights, logits, preprocess_img
     return env, env_name, policy_weights, logits, preprocess_img
 
@@ -44,33 +44,40 @@ def genetic_algorithm(env_name, hidden_layers=tuple(), batch_size=10, load_weigh
     plt.ion()
     fig = plt.figure()
     ax = fig.add_subplot(111)
+    epsilon = 1
 
-    for _ in range(5000):
+    for i in range(5000):
         score = run_env(env, policy_weights, batch_size, render=render, only_score=True, discrete=logits, deterministic=deterministic,
                         preprocess_img=preprocess_img)
 
+        score = np.sum(score) / batch_size
+
         score_buffer.append(score)
 
-        # if score > 30000:
-            # render = True
-            # batch_size += 1
-            # if batch_size > 15:
-            #     return
-            # continue
-        if np.sum(score) / batch_size > best_score:
-            # print(score)
+        if score >= best_score:
             best_score = score
             save(policy_weights, "{}_GA".format(save_name))
-        minimum, maximum = measure_min_max(load("{}_GA".format(save_name)))
-        policy_weights = combine(load("{}_GA".format(save_name)), setup_weights(env, hidden_layers, minimum, maximum))
-        policy_weights = mutate(policy_weights, probability=0.5, magnitude=(maximum - minimum))
+        policy_weights = load("{}_GA".format(save_name))
+        minimum, maximum = measure_min_max(policy_weights)
+        # policy_weights = setup_weights(env, hidden_layers, minimum, maximum)
+        # policy_weights = combine(load("{}_GA".format(save_name)), setup_weights(env, hidden_layers, minimum, maximum))
+        policy_weights = mutate(policy_weights, probability=0.1, magnitude=epsilon * (maximum - minimum))
+        epsilon *= 0.95
 
         plt.cla()
         ax.plot(range(len(score_buffer)), score_buffer, 'r-')
+        ax.set_ylim(-200, 100)
         fig.canvas.draw()
         fig.canvas.flush_events()
+        # if time.time() - start > 1:
+        if i == 250:
+            if deterministic:
+                plt.savefig("{}_GA_deterministic.png".format(save_name))
+            else:
+                plt.savefig("{}_GA.png".format(save_name))
+            break
 
-def reinforce(env_name, hidden_layers=tuple(), batch_size=10, mini_batch=500, policy_epochs=50, policy_lr=3e-4,
+def reinforce(env_name, hidden_layers=tuple(), batch_size=10, mini_batch=500, policy_epochs=50, policy_lr=5e-5,
                             load_weights=True, tweak_param=None, render=False, deterministic=False):
     env, save_name, policy_weights, logits, preprocess_img = init(env_name, hidden_layers, tweak_param, "RNF",
                                                                   load_weights, load_v_weights=False)
@@ -129,22 +136,21 @@ def vanilla_policy_gradient(env_name, hidden_layers=tuple(), batch_size=10, mini
 
     plt.ion()
     fig = plt.figure()
-    plt.subplot(111)
+    ax = fig.add_subplot(111)
     plt.title('batch_size = {}; mini_batch = {}; epochs = {}; lr = {}'.format(batch_size, mini_batch, policy_epochs, policy_lr))
 
-    best_score = -np.inf
-
-    for _ in range(5000):
+    for j in range(5000):
         state_buffer, probs_buffer, actions_buffer, reward_buffer, score, = run_env(env, policy_weights, episodes=batch_size,
                                                                        preprocess_img=preprocess_img, discrete=logits, deterministic=deterministic,
                                                                        render=render, v_weights=v_weights)
+
         if logits:
             for i in range(len(probs_buffer)):
                 probs_buffer[i] *= -1
                 probs_buffer[i][actions_buffer[i]] += 1
 
         reward_buffer = np.reshape(get_v(reward_buffer, 100, 0.99), (-1, 1))
-        
+
         score_buffer = np.append(score_buffer, score)
         mean_buffer = np.append(mean_buffer, [np.mean(score)] * batch_size)
 
@@ -161,12 +167,19 @@ def vanilla_policy_gradient(env_name, hidden_layers=tuple(), batch_size=10, mini
         save(policy_weights, "{}_VPG".format(save_name))
         save(v_weights, "{}_V".format(save_name))
 
+        # ax.cla()
         plt.cla()
-        plt.clf()
-        plt.plot(np.arange(len(score_buffer)), score_buffer, np.arange(len(mean_buffer)), mean_buffer)
-
+        ax.plot(np.arange(len(score_buffer)), score_buffer)
+        ax.set_ylim(-15, 15)
         fig.canvas.draw()
         fig.canvas.flush_events()
+
+        if j == 25:
+            if deterministic:
+                plt.savefig("{}_VPG_deterministic.png".format(save_name))
+            else:
+                plt.savefig("{}_VPG.png".format(save_name))
+            break
 
 
 def soft_actor_critic(env, policy_weights, q1_weights, q2_weights, v_weights, v_target_weights, batch_size=10,
@@ -313,11 +326,9 @@ def soft_actor_critic(env, policy_weights, q1_weights, q2_weights, v_weights, v_
 
 
 if __name__ == "__main__":
-    env_name = "Pendulum-v0"
-    # genetic_algorithm(env_name, hidden_layers=[128], render=True, batch_size=10, load_weights=True, deterministic=True)
-    # vanilla_policy_gradient(env_name, hidden_layers=[], render=False, batch_size=4, epochs=500, mini_batch=2000,
-    #                         lr=1e-3, stochastic=True, load_weights=False)
-    vanilla_policy_gradient(env_name, hidden_layers=[], batch_size=5, render=False, load_weights="Pendulum-v0_GA", deterministic=True)
-    # reinforce(env_name, hidden_layers=[128], render=False, load_weights=False)
+    env_name = "BipedalWalker-v2"
+    genetic_algorithm(env_name, hidden_layers=[32], render=False, batch_size=1, load_weights=False, deterministic=True)
+    # vanilla_policy_gradient(env_name, tweak_param=5, hidden_layers=[128], batch_size=10, render=False, load_weights=False, deterministic=False)
+    # reinforce(env_name, hidden_layers=[], render=False, load_weights=False)
 
     # tweaked_policy_gradient(env_name, hidden_layers=[32], render=False, batch_size=10, epochs=500, mini_batch=1000, lr=1e-3, stochastic=True, load_weights=False)

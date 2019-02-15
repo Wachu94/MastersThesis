@@ -1,4 +1,5 @@
 import random, numpy as np
+import matplotlib.pyplot as plt
 from tqdm import trange
 from common import forward_prop, calculate_gradient, setup_weights
 
@@ -43,6 +44,7 @@ def Adam(X, Y, weights, activation="ReLU", lr=1e-3, b1=0.9, b2=0.999, epsilon=1e
 
         gradient, loss = calculate_gradient(batch_X, batch_Y, weights, activation=activation, logits=logits)
 
+
         if show_progress_bar:
             progress_bar.set_description("Current loss: {:.7f}".format(loss))
         for i, layer in enumerate(gradient):
@@ -65,6 +67,19 @@ if __name__ == "__main__":
     X = [[0, 0], [0, 1], [1, 0], [1, 1]]
     Y = [[0], [1], [1], [0]]
 
-    weights = setup_weights(None, [2, 2, 1])
-    weights = Adam(X, Y, weights, epochs=3e4, logits=False)
+    activation = "ELU"
+
+    weights = setup_weights(None, [2, 128, 1])
+    weights = Adam(X, Y, weights, activation=activation, epochs=500, logits=False)
     print(forward_prop(X, weights))
+
+    delta = 3e-2
+    Z = np.zeros((int(1/delta),int(1/delta)))
+    for r in range(len(Z)):
+        for c in range(len(Z[0])):
+            Z[r][c] = forward_prop([r*delta, c*delta], weights, activation=activation)
+
+    fig, ax = plt.subplots()
+    ax.imshow(Z, interpolation='nearest', cmap=plt.gray(), vmax=1, vmin=0)
+
+    plt.show()

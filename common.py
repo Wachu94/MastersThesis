@@ -15,13 +15,15 @@ def load(name):
     except FileNotFoundError:
         return None
 
+
 def cross_entropy(p, q):
     output = [0] * len(p)
     for i in range(len(p)):
         output[i] = np.sum(p[i] * np.log2(p[i])) - np.sum(p[i] * np.log2(q[i]))
     return output
 
-def calculate_gradient(X, Y, weights, activation="ReLU", logits=True, use_cross_entropy=False):
+
+def calculate_gradient(X, Y, weights, activation="ReLU", logits=True):
     neuron_values = []
     output = X
     for i in range(len(weights)):
@@ -32,20 +34,14 @@ def calculate_gradient(X, Y, weights, activation="ReLU", logits=True, use_cross_
             output = activate(output, activation)
     if logits:
         output = activate(output, "Sigmoid")
-
-    if use_cross_entropy:
-        errors = cross_entropy(Y, output)
-        print(errors)
-        breakpoint()
-    else:
-        errors = [Y - output]
-    loss = np.sum(np.sum((errors[len(errors) - 1]) ** 2))
+    errors = [Y - output]
+    loss = np.sum(np.sum(abs((errors[len(errors) - 1]))))
     for i in range(len(weights) - 1):
         errors.append(errors[i].dot(weights[len(weights) - 1 - i].T))
         errors[i + 1] *= neuron_values[len(neuron_values) - 1 - i]
         errors[i + 1] = np.delete(errors[i + 1], 0, 1)
         if activation == "Sigmoid":
-            errors[i+1] = errors[i + 1] * (1 - errors[i + 1])
+            errors[i + 1] = errors[i + 1] * (1 - errors[i + 1])
     errors.reverse()
 
     gradient = []
@@ -55,7 +51,7 @@ def calculate_gradient(X, Y, weights, activation="ReLU", logits=True, use_cross_
     return gradient, loss
 
 
-def setup_weights(env, hidden_layers, minimum=0, maximum=1, v_weights=False):
+def setup_weights(env, hidden_layers, minimum=-1, maximum=1, v_weights=False):
     if env != None:
         input_size = len(np.reshape(env.reset(), -1))
         if hasattr(env.reset(), "shape"):
@@ -79,18 +75,21 @@ def setup_weights(env, hidden_layers, minimum=0, maximum=1, v_weights=False):
 
 
 def activate(X, func_name):
-   if func_name == "ReLU":
-       X[X<0] = 0
-   elif func_name == "Sigmoid":
-       for i in range(len(X)):
-           X[i] = 1/(1 + np.exp(-X[i]))
-   elif func_name == "Softmax":
-       sum = 0
-       for i in range(len(X)):
-           X[i] = np.exp(X[i])
-           sum += X[i]
-       X /= sum
-   return X
+    if func_name == "ReLU":
+        X[X<0] = 0
+    elif func_name == "Sigmoid":
+        for i in range(len(X)):
+            X[i] = 1 / (1 + np.exp(-X[i]))
+    elif func_name == "ELU":
+        for i in range(len(X)):
+            X[X < 0] = np.exp(X[X < 0]) - 1
+    elif func_name == "Softmax":
+        sum = 0
+        for i in range(len(X)):
+            X[i] = np.exp(X[i])
+            sum += X[i]
+        X /= sum
+    return X
 
 
 def forward_prop(X, weights, activation="ReLU"):
@@ -124,10 +123,11 @@ def backward_prop(errors, neuron_values, weights, activation="ReLU"):
 
 def combine(A, B):
     for i in range(len(A)):
-        min_r = random.randint(0,len(A[i]))
-        min_c = random.randint(0,len(A[i][0]))
+        min_r = random.randint(0, len(A[i]))
+        min_c = random.randint(0, len(A[i][0]))
         A[i][min_r:][min_c:] = B[i][min_r:][min_c:]
     return A
+
 
 def mutate(weights, probability=0.1, magnitude=1):
     for i in range(len(weights)):
@@ -140,14 +140,14 @@ def mutate(weights, probability=0.1, magnitude=1):
 
 
 def measure_min_max(weights):
-   minimum = np.inf
-   maximum = -np.inf
-   for layer in weights:
-       if np.max(layer) > maximum:
-           maximum = np.max(layer)
-       if np.min(layer) < minimum:
-           minimum = np.min(layer)
-   return minimum, maximum
+    minimum = np.inf
+    maximum = -np.inf
+    for layer in weights:
+        if np.max(layer) > maximum:
+            maximum = np.max(layer)
+        if np.min(layer) < minimum:
+            minimum = np.min(layer)
+    return minimum, maximum
 
 
 def preprocess(observation):
@@ -171,12 +171,12 @@ def get_v(reward_buffer, horizon, discount):
         for i in range(len(reward_buffer[episode])):
             V.append(0)
             for t in range(i, min(i + horizon, len(reward_buffer[episode]))):
-                V[len(V) - 1] += reward_buffer[episode][t] * discount**(t-i)
+                V[len(V) - 1] += reward_buffer[episode][t] * discount ** (t - i)
     return np.array(V)
 
 
-def run_env(env, weights, episodes, activation="ReLU", preprocess_img=False, discrete=True, deterministic=False, render=False, show_progress_bar=True, only_score=False, v_weights=None):
-
+def run_env(env, weights, episodes, activation="ReLU", preprocess_img=False, discrete=True, deterministic=False,
+            render=False, show_progress_bar=True, only_score=False, v_weights=None):
     state_buffer, probs_buffer, action_buffer, reward_buffer = [], [], [], [[] for _ in range(episodes)]
 
     # plt.ion()
@@ -205,7 +205,7 @@ def run_env(env, weights, episodes, activation="ReLU", preprocess_img=False, dis
             logits = forward_prop(observation, weights, activation)
             # v_value = forward_prop(observation, v_weights, activation)
             probs = logits
-            if not deterministic:
+            if not deterministic and discrete:
                 probs = activate(logits, "Sigmoid")
                 probs /= np.sum(probs)
 
@@ -242,7 +242,7 @@ def run_env(env, weights, episodes, activation="ReLU", preprocess_img=False, dis
 
             if done:
                 if show_progress_bar:
-                    progress_bar.set_description("Avg score: {:.7f}".format(np.sum(score)/(i+1)))
+                    progress_bar.set_description("Avg score: {:.7f}".format(np.sum(score) / (i + 1)))
                 break
     progress_bar.close()
     if only_score:
